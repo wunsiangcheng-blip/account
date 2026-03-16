@@ -1,0 +1,8 @@
+name = "account"
+compatibility_date = "2024-03-14"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "account_db"
+database_id = "fb729672-3b03-422a-9551-ef6436a6ef48"

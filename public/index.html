@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>迷你記帳工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 min-h-screen flex flex-col items-center">
+    <header class="bg-blue-500 text-white w-full py-4 text-center text-xl font-bold">
+        迷你記帳工具
+    </header>
+
+    <main class="w-full max-w-2xl p-4">
+        <form id="add-item-form" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="item_name">
+                    項目名稱
+                </label>
+                <input
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    id="item_name" type="text" placeholder="輸入項目名稱">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="datetime">
+                    日期與時間
+                </label>
+                <input
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    id="datetime" type="datetime-local">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="amount">
+                    金額 (新台幣)
+                </label>
+                <input
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    id="amount" type="number" step="0.01" placeholder="輸入金額（可為負數）">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="note">
+                    備註
+                </label>
+                <textarea
+                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                    id="note" placeholder="輸入備註"></textarea>
+            </div>
+            <div class="flex items-center justify-between">
+                <button
+                    class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                    type="submit">
+                    新增項目
+                </button>
+            </div>
+        </form>
+
+        <div id="items-list" class="bg-white shadow-md rounded px-6 pt-6 pb-8">
+            <h2 class="text-gray-700 text-lg font-bold mb-2">記帳項目</h2>
+            <!-- 總額顯示於列表上方 -->
+            <div
+                class="mb-4 flex flex-wrap items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 min-w-0">
+                <span class="text-gray-600 font-semibold whitespace-nowrap">總額：</span>
+                <span id="all-total-amount" class="text-xl font-bold text-emerald-700 break-all">0.00</span>
+                <span class="text-gray-500 text-sm whitespace-nowrap">新台幣</span>
+            </div>
+            <ul id="items" class="space-y-3">
+                <!-- 記帳項目將顯示在這裡 -->
+            </ul>
+            <!-- 分頁控制元件 -->
+            <div id="pagination" class="mt-5 flex items-center justify-between gap-2">
+                <button id="prev-btn"
+                    class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-4 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                    onclick="changePage(-1)">
+                    上一頁
+                </button>
+                <span id="page-info" class="text-gray-600 text-sm">第 1 / 1 頁（共 0 筆）</span>
+                <button id="next-btn"
+                    class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-4 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                    onclick="changePage(1)">
+                    下一頁
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const form = document.getElementById('add-item-form');
+        const itemsList = document.getElementById('items');
+        const allTotalAmount = document.getElementById('all-total-amount');
+        const pageInfo = document.getElementById('page-info');
+        const prevBtn = document.getElementById('prev-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const datetimeInput = document.getElementById('datetime');
+
+        let editingItemId = null;
+        let editingDraft = null;
+        let currentPage = 1;
+        const PAGE_SIZE = 10;
+        let totalPages = 1;
+        let totalCount = 0;
+        // 用於計算全部總額（所有分頁的加總）
+        let globalTotal = 0;
+
+        function currentDatetimeLocal() {
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const year = now.getFullYear();
+            const month = pad(now.getMonth() + 1);
+            const day = pad(now.getDate());
+            const hour = pad(now.getHours());
+            const minute = pad(now.getMinutes());
+            return `${year}-${month}-${day}T${hour}:${minute}`;
+        }
+
+        function changePage(delta) {
+            const newPage = currentPage + delta;
+            if (newPage < 1 || newPage > totalPages) return;
+            currentPage = newPage;
+            fetchItems();
+        }
+
+        async function deleteItem(id) {
+            if (!confirm('確定要刪除這筆記帳嗎？')) {
+                return;
+            }
+
+            const response = await fetch(`/delete_item/${id}`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({ message: '刪除失敗' }));
+                alert(errorBody.message || '刪除失敗');
+                return;
+            }
+
+            // 如果刪除後目前頁沒有資料，回到上一頁
+            if (currentPage > 1 && totalCount - 1 <= (currentPage - 1) * PAGE_SIZE) {
+                currentPage--;
+            }
+            fetchItems();
+        }
+
+        function startEdit(item) {
+            editingItemId = item.id;
+            editingDraft = {
+                item_name: item.item_name || '',
+                datetime: (item.datetime || '').slice(0, 16),
+                amount: Number(item.amount || 0).toFixed(2),
+                note: item.note || '',
+            };
+            fetchItems();
+        }
+
+        function cancelEdit() {
+            editingItemId = null;
+            editingDraft = null;
+            fetchItems();
+        }
+
+        async function saveEdit(id) {
+            if (!editingDraft) return;
+
+            const response = await fetch(`/update_item/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(editingDraft),
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({ message: '更新失敗' }));
+                alert(errorBody.message || '更新失敗');
+                return;
+            }
+
+            editingItemId = null;
+            editingDraft = null;
+            fetchItems();
+        }
+
+        async function fetchAllTotal() {
+            // 取得全部總額（抓所有資料計算），用 page_size=9999 近似全部
+            try {
+                const resp = await fetch('/get_items?page=1&page_size=9999');
+                const data = await resp.json();
+                const sum = (data.items || []).reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+                allTotalAmount.textContent = sum.toFixed(2);
+                // 設定顏色：負為紅色，正為綠色
+                allTotalAmount.className = sum < 0
+                    ? 'text-xl font-bold text-red-600'
+                    : 'text-xl font-bold text-emerald-700';
+            } catch (e) {
+                allTotalAmount.textContent = '—';
+            }
+        }
+
+        async function fetchItems() {
+            const response = await fetch(`/get_items?page=${currentPage}&page_size=${PAGE_SIZE}`);
+            const data = await response.json();
+
+            const items = data.items || [];
+            totalCount = data.total_count || 0;
+            totalPages = data.total_pages || 1;
+            currentPage = data.page || 1;
+
+            // 更新分頁資訊
+            pageInfo.textContent = `第 ${currentPage} / ${totalPages} 頁（共 ${totalCount} 筆）`;
+            prevBtn.disabled = currentPage <= 1;
+            nextBtn.disabled = currentPage >= totalPages;
+
+            itemsList.innerHTML = '';
+            let pageTotal = 0;
+
+            items.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'border border-gray-200 rounded-xl p-4 bg-gray-50';
+
+                const actions = document.createElement('div');
+                actions.className = 'mt-3 flex flex-wrap gap-2';
+
+                if (editingItemId === item.id && editingDraft) {
+                    const editor = document.createElement('div');
+                    editor.className = 'grid gap-2';
+
+                    const nameInput = document.createElement('input');
+                    nameInput.className = 'border rounded px-2 py-1';
+                    nameInput.value = editingDraft.item_name;
+                    nameInput.addEventListener('input', (e) => {
+                        editingDraft.item_name = e.target.value;
+                    });
+
+                    const datetimeInput = document.createElement('input');
+                    datetimeInput.className = 'border rounded px-2 py-1';
+                    datetimeInput.type = 'datetime-local';
+                    datetimeInput.value = editingDraft.datetime;
+                    datetimeInput.addEventListener('input', (e) => {
+                        editingDraft.datetime = e.target.value;
+                    });
+
+                    const amountInput = document.createElement('input');
+                    amountInput.className = 'border rounded px-2 py-1';
+                    amountInput.type = 'number';
+                    amountInput.step = '0.01';
+                    amountInput.value = editingDraft.amount;
+                    amountInput.addEventListener('input', (e) => {
+                        editingDraft.amount = e.target.value;
+                    });
+
+                    const noteInput = document.createElement('textarea');
+                    noteInput.className = 'border rounded px-2 py-1';
+                    noteInput.value = editingDraft.note;
+                    noteInput.addEventListener('input', (e) => {
+                        editingDraft.note = e.target.value;
+                    });
+
+                    const saveBtn = document.createElement('button');
+                    saveBtn.textContent = '儲存';
+                    saveBtn.className = 'bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-3 py-1 rounded';
+                    saveBtn.addEventListener('click', () => saveEdit(item.id));
+
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.textContent = '取消';
+                    cancelBtn.className = 'bg-gray-500 hover:bg-gray-600 text-white text-sm px-3 py-1 rounded';
+                    cancelBtn.addEventListener('click', cancelEdit);
+
+                    actions.appendChild(saveBtn);
+                    actions.appendChild(cancelBtn);
+                    const header = document.createElement('div');
+                    header.className = 'flex items-center justify-between mb-2';
+                    header.innerHTML = `<span class="text-sm text-gray-500">#${item.id}</span><span class="text-sm font-semibold text-blue-700">編輯模式</span>`;
+                    li.appendChild(header);
+                    editor.appendChild(nameInput);
+                    editor.appendChild(datetimeInput);
+                    editor.appendChild(amountInput);
+                    editor.appendChild(noteInput);
+                    li.appendChild(editor);
+                    li.appendChild(actions);
+                } else {
+                    const top = document.createElement('div');
+                    top.className = 'flex items-start justify-between gap-3';
+                    const left = document.createElement('div');
+                    left.className = 'min-w-0';
+                    const title = document.createElement('div');
+                    title.className = 'text-base font-semibold text-gray-900 truncate';
+                    title.textContent = item.item_name || '(未命名項目)';
+                    const meta = document.createElement('div');
+                    meta.className = 'mt-1 text-xs text-gray-500';
+                    meta.textContent = `#${item.id}  ${item.datetime}`;
+                    left.appendChild(title);
+                    left.appendChild(meta);
+
+                    const amt = Number(item.amount || 0);
+                    const amount = document.createElement('div');
+                    amount.className = 'text-right shrink-0';
+                    const amtColor = amt < 0 ? 'text-red-600' : 'text-blue-700';
+                    amount.innerHTML = `<div class="text-xs text-gray-500">金額</div><div class="text-lg font-bold ${amtColor}">${amt.toFixed(2)}</div>`;
+                    top.appendChild(left);
+                    top.appendChild(amount);
+
+                    const note = document.createElement('div');
+                    note.className = 'mt-3 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-2';
+                    note.textContent = item.note ? `備註：${item.note}` : '備註：無';
+
+                    const editBtn = document.createElement('button');
+                    editBtn.textContent = '編輯';
+                    editBtn.className = 'bg-amber-500 hover:bg-amber-600 text-white text-sm px-3 py-1 rounded';
+                    editBtn.addEventListener('click', () => startEdit(item));
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.textContent = '刪除';
+                    deleteBtn.className = 'bg-red-500 hover:bg-red-600 text-white text-sm px-3 py-1 rounded';
+                    deleteBtn.addEventListener('click', () => deleteItem(item.id));
+
+                    actions.appendChild(editBtn);
+                    actions.appendChild(deleteBtn);
+                    li.appendChild(top);
+                    li.appendChild(note);
+                    li.appendChild(actions);
+                }
+                itemsList.appendChild(li);
+                pageTotal += Number(item.amount) || 0;
+            });
+
+
+            fetchAllTotal();
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const item = {
+                item_name: document.getElementById('item_name').value,
+                datetime: datetimeInput.value || currentDatetimeLocal(),
+                amount: document.getElementById('amount').value,
+                note: document.getElementById('note').value,
+            };
+
+            const response = await fetch('/add_item', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(item),
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({ message: '新增失敗' }));
+                alert(errorBody.message || '新增失敗');
+                return;
+            }
+
+            form.reset();
+            datetimeInput.value = currentDatetimeLocal();
+            currentPage = 1;
+            fetchItems();
+        });
+
+        datetimeInput.value = currentDatetimeLocal();
+        fetchItems();
+    </script>
+</body>
+
+</html>
