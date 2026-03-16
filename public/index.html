@@ -126,7 +126,7 @@
                 return;
             }
 
-            const response = await fetch(`/delete_item/${id}`, {
+            const response = await fetch(`/api/delete_item/${id}`, {
                 method: 'DELETE',
             });
 
@@ -163,7 +163,7 @@
         async function saveEdit(id) {
             if (!editingDraft) return;
 
-            const response = await fetch(`/update_item/${id}`, {
+            const response = await fetch(`/api/update_item/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -185,7 +185,7 @@
         async function fetchAllTotal() {
             // 取得全部總額（抓所有資料計算），用 page_size=9999 近似全部
             try {
-                const resp = await fetch('/get_items?page=1&page_size=9999');
+                const resp = await fetch('/api/get_items?page=1&page_size=9999');
                 const data = await resp.json();
                 const sum = (data.items || []).reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
                 allTotalAmount.textContent = sum.toFixed(2);
@@ -199,7 +199,7 @@
         }
 
         async function fetchItems() {
-            const response = await fetch(`/get_items?page=${currentPage}&page_size=${PAGE_SIZE}`);
+            const response = await fetch(`/api/get_items?page=${currentPage}&page_size=${PAGE_SIZE}`);
             const data = await response.json();
 
             const items = data.items || [];
@@ -339,7 +339,7 @@
                 note: document.getElementById('note').value,
             };
 
-            const response = await fetch('/add_item', {
+            const response = await fetch('/api/add_item', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
